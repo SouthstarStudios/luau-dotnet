@@ -21,7 +21,7 @@ jobs:
           - { plugin: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, file: libluau.so, out: libluau.so, test: true }
           - { plugin: osx-arm64, os: macos-15, target: aarch64-apple-darwin, file: libluau.dylib, out: libluau.dylib, test: true }
           - { plugin: osx-x64, os: macos-15-intel, target: x86_64-apple-darwin, file: libluau.dylib, out: libluau.dylib, test: true }
-          - { plugin: ios-arm64, os: macos-15, target: aarch64-apple-ios, file: libluau.a, out: libluau.a, test: false }
+          - { plugin: ios-arm64, os: macos-15-intel, target: aarch64-apple-ios, file: libluau.a, out: libluau.a, test: false }
           - { plugin: android-arm64, os: ubuntu-22.04, target: aarch64-linux-android, file: libluau.so, out: libluau.so, test: false }
           - { plugin: android-x64, os: ubuntu-22.04, target: x86_64-linux-android, file: libluau.so, out: libluau.so, test: false }
     steps:
