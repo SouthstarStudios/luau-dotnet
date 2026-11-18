@@ -68,6 +68,20 @@ jobs:
         shell: bash
         run: cargo build --release --target ${{ matrix.target }}
 
+      # A shared library that links but leaves Luau's own symbols unresolved (or pulls in a static libc) only fails
+      # when the game loads it, so check here
+      - name: Check the shared library
+        if: contains(matrix.target, 'linux')
+        shell: bash
+        run: |
+          f=native/luau-ffi/target/${{ matrix.target }}/release/${{ matrix.file }}
+          if [ -n "$ANDROID_NDK_HOME" ]; then bin=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-; else bin=""; fi
+          ${bin}readelf -d "$f" | grep -E "NEEDED|SONAME"
+          ${bin}readelf -d "$f" | grep -q "NEEDED.*libc\.so" || { echo "libc.so isn't a dependency"; exit 1; }
+          missing=$(${bin}nm -D --undefined-only "$f" | grep -E " (lua|luaL|luau|luarequire|luaopen)_" || true)
+          if [ -n "$missing" ]; then echo "Unresolved Luau symbols:"; echo "$missing"; exit 1; fi
+          echo "undefined symbols: $(${bin}nm -D --undefined-only "$f" | wc -l)"
+
       - name: Smoke test (built-ins, codegen)
         if: matrix.test
         working-directory: native/luau-ffi

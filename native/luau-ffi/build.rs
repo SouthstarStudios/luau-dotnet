@@ -66,12 +66,20 @@ fn main() {
     } else if android {
         // libc++ linked statically (CMAKE_ANDROID_STL_TYPE c++_static), so the .so doesn't need libc++_shared.so,
         // which Unity's Android player doesn't ship
+        // Only these two archives are copied to a private folder: the NDK folder that holds them also has the static
+        // libc.a, which must never end up in a shared library
         let ndk_home = env::var("ANDROID_NDK_HOME").unwrap();
         let arch = if target.starts_with("aarch64") { "aarch64" } else { "x86_64" };
-        println!(
-            "cargo:rustc-link-search=native={}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/{}-linux-android",
+        let ndk_lib = format!(
+            "{}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/{}-linux-android",
             ndk_home, arch
         );
+        let cxx_dir = format!("{}/cxx", env::var("OUT_DIR").unwrap());
+        std::fs::create_dir_all(&cxx_dir).unwrap();
+        for lib in ["libc++_static.a", "libc++abi.a"] {
+            std::fs::copy(format!("{}/{}", ndk_lib, lib), format!("{}/{}", cxx_dir, lib)).unwrap();
+        }
+        println!("cargo:rustc-link-search=native={}", cxx_dir);
         println!("cargo:rustc-link-lib=static=c++_static");
         println!("cargo:rustc-link-lib=static=c++abi");
     } else if target != "x86_64-pc-windows-msvc" {
@@ -281,56 +289,17 @@ fn new_cmake_config() -> cmake::Config {
             "CMAKE_CXX_FLAGS",
             "-fPIC --target=arm64-apple-ios -miphoneos-version-min=17.5",
         );
-    } else if target == "aarch64-linux-android" {
+    } else if target.ends_with("-linux-android") {
+        // The NDK's own toolchain file (the cmake crate leaves the compilers to it), libc++ static, API 26
         let ndk_home = std::env::var("ANDROID_NDK_HOME").unwrap();
-        let ndk_bin = format!("{}/toolchains/llvm/prebuilt/linux-x86_64/bin", ndk_home);
-        config.define("CMAKE_SYSTEM_NAME", "Android");
-        config.define("CMAKE_SYSTEM_PROCESSOR", "aarch64");
-        config.define("CMAKE_ANDROID_ARCH_ABI", "arm64-v8a");
-        config.define("CMAKE_ANDROID_NDK", &ndk_home);
-        config.define("CMAKE_ANDROID_STL_TYPE", "c++_static");
-        config.define("CMAKE_ANDROID_API", "26");
+        let abi = if target.starts_with("aarch64") { "arm64-v8a" } else { "x86_64" };
         config.define(
-            "CMAKE_C_COMPILER",
-            format!("{}/aarch64-linux-android26-clang", ndk_bin),
+            "CMAKE_TOOLCHAIN_FILE",
+            format!("{}/build/cmake/android.toolchain.cmake", ndk_home),
         );
-        config.define(
-            "CMAKE_CXX_COMPILER",
-            format!("{}/aarch64-linux-android26-clang++", ndk_bin),
-        );
-        config.define(
-            "CMAKE_C_FLAGS",
-            "-DANDROID -ffunction-sections -fdata-sections -fPIC",
-        );
-        config.define(
-            "CMAKE_CXX_FLAGS",
-            "-DANDROID -ffunction-sections -fdata-sections -fPIC",
-        );
-    } else if target == "x86_64-linux-android" {
-        let ndk_home = std::env::var("ANDROID_NDK_HOME").unwrap();
-        let ndk_bin = format!("{}/toolchains/llvm/prebuilt/linux-x86_64/bin", ndk_home);
-        config.define("CMAKE_SYSTEM_NAME", "Android");
-        config.define("CMAKE_SYSTEM_PROCESSOR", "x86_64");
-        config.define("CMAKE_ANDROID_ARCH_ABI", "x86_64");
-        config.define("CMAKE_ANDROID_NDK", &ndk_home);
-        config.define("CMAKE_ANDROID_STL_TYPE", "c++_static");
-        config.define("CMAKE_ANDROID_API", "26");
-        config.define(
-            "CMAKE_C_COMPILER",
-            format!("{}/x86_64-linux-android26-clang", ndk_bin),
-        );
-        config.define(
-            "CMAKE_CXX_COMPILER",
-            format!("{}/x86_64-linux-android26-clang++", ndk_bin),
-        );
-        config.define(
-            "CMAKE_C_FLAGS",
-            "-DANDROID -ffunction-sections -fdata-sections -fPIC -m64",
-        );
-        config.define(
-            "CMAKE_CXX_FLAGS",
-            "-DANDROID -ffunction-sections -fdata-sections -fPIC -m64",
-        );
+        config.define("ANDROID_ABI", abi);
+        config.define("ANDROID_PLATFORM", "android-26");
+        config.define("ANDROID_STL", "c++_static");
     } else if target == "wasm32-unknown-emscripten" {
         if let Ok(em_dir) = env::var("EM_DIR") {
             // By default cmake crate overrides compiler paths with not qualified ones, causing missing compiler errors with no emscripten in PATH.
