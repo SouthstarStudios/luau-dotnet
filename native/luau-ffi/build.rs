@@ -217,8 +217,9 @@ const UNBOUND: &[&str] = &[
     "lua_setmemorycage",
 ];
 
+// csbindgen's default filter (no names starting with '_', such as MSVC's __va_start) plus the list above
 fn keep_method(name: String) -> bool {
-    !UNBOUND.contains(&name.as_str())
+    !name.starts_with('_') && !UNBOUND.contains(&name.as_str())
 }
 
 // San Aurie fork: the Luau update changed a few signatures that Luau.dll and other callers were compiled against.
