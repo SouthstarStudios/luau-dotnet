@@ -147,6 +147,7 @@ fn main() {
         .unwrap();
 
     let cs = new_csbindgen_builder("src/luau.rs")
+        .method_filter(keep_method)
         .rust_file_header("use super::luau::*;")
         .csharp_file_header(
             "
@@ -200,6 +201,24 @@ using luarequire_pushproxyrequire_config_init_delegate = Luau.Native.luarequire_
         "../../src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.Require.g.cs",
     )
     .unwrap();
+}
+
+// San Aurie fork: functions new in Luau 0.7xx whose callback parameters are typedefs csbindgen can't name in C#.
+// They are left out of the bindings (and the ffi_ exports) until something needs them.
+const UNBOUND: &[&str] = &[
+    "lua_cpcall",
+    "lua_memorydump",
+    "lua_setuserdatamark",
+    "lua_setembeddergc",
+    "lua_registeruserdatadirectaccess",
+    "lua_registeruserdatadirectfieldget",
+    "lua_callhook",
+    "lua_getcounters",
+    "lua_setmemorycage",
+];
+
+fn keep_method(name: String) -> bool {
+    !UNBOUND.contains(&name.as_str())
 }
 
 // San Aurie fork: the Luau update changed a few signatures that Luau.dll and other callers were compiled against.
