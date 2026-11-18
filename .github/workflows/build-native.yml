@@ -25,7 +25,7 @@ jobs:
           - { plugin: android-arm64, os: ubuntu-22.04, target: aarch64-linux-android, file: libluau.so, out: libluau.so, test: false }
           - { plugin: android-x64, os: ubuntu-22.04, target: x86_64-linux-android, file: libluau.so, out: libluau.so, test: false }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -36,6 +36,7 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup target add ${{ matrix.target }}
+          rustup component add rustfmt
           rustc --version
 
       - name: Android NDK
@@ -86,7 +87,7 @@ jobs:
             cp native/luau-ffi/src/*.rs out/Luau.Native/
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: libluau-${{ matrix.plugin }}
           path: out
@@ -95,11 +96,11 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts
           pattern: libluau-*
@@ -139,7 +140,7 @@ jobs:
           cat artifacts/BUILD-INFO.txt
           find artifacts -type f | sort | xargs ls -la
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: luau-unity-plugins
           path: artifacts

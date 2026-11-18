@@ -92,13 +92,13 @@ fn main() {
         .unwrap();
 
     bindgen::Builder::default()
-        .headers(["../../luau/Require/Runtime/include/Luau/Require.h"])
+        .headers(["../../luau/Require/include/Luau/Require.h"])
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17")
         .clang_arg("-I../../luau/Compiler/include")
         .clang_arg("-I../../luau/VM/include")
-        .clang_arg("-I../../luau/Require/Runtime/include")
+        .clang_arg("-I../../luau/Require/include")
         .clang_arg("-DLUA_API=extern\"C\"")
         .allowlist_function("luarequire_.*")
         .allowlist_function("luaopen_require")
