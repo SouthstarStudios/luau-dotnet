@@ -120,15 +120,20 @@ jobs:
       - name: Check exports
         run: |
           set -e
+          llvm=$(ls -d /usr/lib/llvm-* | sort -V | tail -1)/bin
           for f in artifacts/Plugins/linux-x64/libluau.so artifacts/Plugins/android-arm64/libluau.so artifacts/Plugins/android-x64/libluau.so; do
             for s in ffi_luau_codegen_supported ffi_luau_codegen_create ffi_luau_codegen_compile ffi_luau_compile ffi_lua_newstate; do
-              nm -D --defined-only "$f" | grep -q " $s$" || { echo "$f is missing $s"; exit 1; }
+              $llvm/llvm-nm -D --defined-only "$f" | grep -q " $s$" || { echo "$f is missing $s"; exit 1; }
             done
-            echo "$f:"; readelf -d "$f" | grep NEEDED || echo "  (no NEEDED entries)"
+            echo "$f: $(file -b "$f")"
+            $llvm/llvm-readelf -d "$f" | grep -E "NEEDED|SONAME" || echo "  (no NEEDED entries)"
+            echo "  undefined: $($llvm/llvm-nm -D --undefined-only "$f" | wc -l)"
           done
-          objdump -p artifacts/Plugins/win-x64/libluau.dll | grep -q ffi_luau_codegen_supported
-          objdump -p artifacts/Plugins/win-x64/libluau.dll | grep "DLL Name"
-          nm artifacts/Plugins/ios-arm64/libluau.a 2>/dev/null | grep -q "T _ffi_luau_codegen_supported"
+          $llvm/llvm-objdump -p artifacts/Plugins/win-x64/libluau.dll | grep -q ffi_luau_codegen_supported
+          $llvm/llvm-objdump -p artifacts/Plugins/win-x64/libluau.dll | grep "DLL Name"
+          $llvm/llvm-nm artifacts/Plugins/ios-arm64/libluau.a 2>/dev/null | grep -q "T _ffi_luau_codegen_supported"
+          $llvm/llvm-lipo -info artifacts/Plugins/osx/libluau.dylib 2>/dev/null || true
+          $llvm/llvm-nm -gU artifacts/Plugins/osx/libluau.dylib --arch=arm64 | grep -c " _ffi_" || true
 
       - name: Build info
         run: |
