@@ -40,30 +40,11 @@ fn main() {
     );
 
     let target = build_target::target_triple().unwrap();
-    if target == "aarch64-unknown-linux-gnu" || target == "x86_64-unknown-linux-gnu" {
-        // Luau is compiled with g++ here, so it needs libstdc++ (linking libc++ left its symbols unresolved)
-        println!("cargo:rustc-link-search=native={}/build", dst.display());
-        println!("cargo:rustc-link-lib=dylib=stdc++");
-    } else if target == "x86_64-pc-windows-msvc" {
-        println!(
-            "cargo:rustc-link-search=native={}/build/Release",
-            dst.display()
-        );
-    } else if target.ends_with("-linux-android") {
-        // libc++ linked statically (CMAKE_ANDROID_STL_TYPE c++_static), so the .so doesn't need libc++_shared.so,
-        // which Unity's Android player doesn't ship
-        println!("cargo:rustc-link-search=native={}/build", dst.display());
-        let ndk_home = env::var("ANDROID_NDK_HOME").unwrap();
-        let arch = if target.starts_with("aarch64") { "aarch64" } else { "x86_64" };
-        println!(
-            "cargo:rustc-link-search=native={}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/{}-linux-android",
-            ndk_home, arch
-        );
-        println!("cargo:rustc-link-lib=static=c++_static");
-        println!("cargo:rustc-link-lib=static=c++abi");
+    let android = target.ends_with("-linux-android");
+    if target == "x86_64-pc-windows-msvc" {
+        println!("cargo:rustc-link-search=native={}/build/Release", dst.display());
     } else {
         println!("cargo:rustc-link-search=native={}/build", dst.display());
-        println!("cargo:rustc-link-lib=dylib=c++");
     }
 
     // Dependents before their dependencies (GNU ld resolves static libraries in order). Luau 0.7xx merged
@@ -77,13 +58,42 @@ fn main() {
     println!("cargo:rustc-link-lib=static=Luau.Bytecode");
     println!("cargo:rustc-link-lib=static=Luau.Common");
 
+    // The C++ runtime last, after everything that needs it (rustc links with --as-needed, which drops a shared
+    // library named before its users)
+    if target == "aarch64-unknown-linux-gnu" || target == "x86_64-unknown-linux-gnu" {
+        // Luau is compiled with g++ here
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    } else if android {
+        // libc++ linked statically (CMAKE_ANDROID_STL_TYPE c++_static), so the .so doesn't need libc++_shared.so,
+        // which Unity's Android player doesn't ship
+        let ndk_home = env::var("ANDROID_NDK_HOME").unwrap();
+        let arch = if target.starts_with("aarch64") { "aarch64" } else { "x86_64" };
+        println!(
+            "cargo:rustc-link-search=native={}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/{}-linux-android",
+            ndk_home, arch
+        );
+        println!("cargo:rustc-link-lib=static=c++_static");
+        println!("cargo:rustc-link-lib=static=c++abi");
+    } else if target != "x86_64-pc-windows-msvc" {
+        println!("cargo:rustc-link-lib=dylib=c++");
+    }
+
+    // bindgen parses the headers for the target; Android needs the NDK's sysroot instead of the host's headers
+    let mut clang_args = vec![format!("--target={}", target)];
+    if android {
+        clang_args.push(format!(
+            "--sysroot={}/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
+            env::var("ANDROID_NDK_HOME").unwrap()
+        ));
+    }
+
     bindgen::Builder::default()
         .headers([
             "../../luau/VM/include/lua.h",
             "../../luau/VM/include/lualib.h",
             "../../luau/Compiler/include/luacode.h",
         ])
-        .clang_arg(format!("--target={}", target))
+        .clang_args(&clang_args)
         .clang_arg("-fvisibility=default")
         .layout_tests(false)
         .generate()
@@ -105,7 +115,7 @@ fn main() {
         .allowlist_type("luarequire_.*")
         .blocklist_type("lua_State")
         .raw_line("use super::luau::*;")
-        .clang_arg(format!("--target={}", target))
+        .clang_args(&clang_args)
         .clang_arg("-fvisibility=default")
         .layout_tests(false)
         .generate()
@@ -120,7 +130,7 @@ fn main() {
         .allowlist_function("luau_codegen_.*")
         .blocklist_type("lua_State")
         .raw_line("use super::luau::*;")
-        .clang_arg(format!("--target={}", target))
+        .clang_args(&clang_args)
         .clang_arg("-fvisibility=default")
         .layout_tests(false)
         .generate()
