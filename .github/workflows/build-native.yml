@@ -83,6 +83,8 @@ jobs:
             mkdir -p out/Native out/Luau.Native
             cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.g.cs out/Native/
             cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.Require.g.cs out/Native/
+            cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.CodeGen.cs out/Native/
+            cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.Compat.cs out/Native/
             cp src/Luau.Native/NativeMethods.g.cs src/Luau.Native/NativeMethods.Require.g.cs out/Luau.Native/
             cp native/luau-ffi/src/*.rs out/Luau.Native/
           fi

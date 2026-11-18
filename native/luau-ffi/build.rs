@@ -143,6 +143,7 @@ fn main() {
         .csharp_file_header(
             "
 using lua_newstate_f_delegate = Luau.Native.lua_Alloc;
+using lua_newstate_allocator_delegate = Luau.Native.lua_Alloc;
 using lua_pushcclosurek_fn__delegate = Luau.Native.lua_CFunction;
 using lua_tocfunction_return_delegate = Luau.Native.lua_CFunction;
 using lua_pushcclosurek_cont_delegate = Luau.Native.lua_Continuation;
@@ -162,6 +163,8 @@ using lua_getcoverage_callback_delegate = Luau.Native.lua_Coverage;
     cs.csharp_dll_name_if("(UNITY_IOS || UNITY_WEBGL) && !UNITY_EDITOR", "__Internal")
         .generate_csharp_file("../../src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.g.cs")
         .unwrap();
+    keep_csharp_api("../../src/Luau.Native/NativeMethods.g.cs");
+    keep_csharp_api("../../src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.g.cs");
 
     let cs2 = new_csbindgen_builder("src/luau_require.rs")
         .rust_file_header(
@@ -189,6 +192,21 @@ using luarequire_pushproxyrequire_config_init_delegate = Luau.Native.luarequire_
         "../../src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.Require.g.cs",
     )
     .unwrap();
+}
+
+// San Aurie fork: the Luau update changed a few signatures that Luau.dll and other callers were compiled against.
+// The generated C# keeps the old ones where the native call is the same (NativeMethods.Compat.cs has the rest):
+//   lua_unref now returns int (the C# side keeps void; an ignored return value is safe)
+//   lua_pushvfstring's va_list is a pointer on every target (bindgen spells it per platform)
+fn keep_csharp_api(path: &str) {
+    let text = std::fs::read_to_string(path).unwrap();
+    let text = text
+        .replace(
+            "public static extern int lua_unref(lua_State* L, int ref_);",
+            "public static extern void lua_unref(lua_State* L, int ref_);",
+        )
+        .replace("__va_list_tag* argp", "byte* argp");
+    std::fs::write(path, text).unwrap();
 }
 
 fn new_cmake_config() -> cmake::Config {
