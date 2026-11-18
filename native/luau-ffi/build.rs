@@ -32,8 +32,16 @@ fn main() {
         dst.display()
     );
 
+    // San Aurie fork: native code generation (luau_codegen_*)
+    let dst = new_cmake_config().build_target("Luau.CodeGen").build();
+    println!(
+        "cargo:warning=CMake configure (Luau.CodeGen) completed: {}",
+        dst.display()
+    );
+
     let target = build_target::target_triple().unwrap();
-    if target == "aarch64-unknown-linux-gnu" {
+    if target == "aarch64-unknown-linux-gnu" || target == "x86_64-unknown-linux-gnu" {
+        // Luau is compiled with g++ here, so it needs libstdc++ (linking libc++ left its symbols unresolved)
         println!("cargo:rustc-link-search=native={}/build", dst.display());
         println!("cargo:rustc-link-lib=dylib=stdc++");
     } else if target == "x86_64-pc-windows-msvc" {
@@ -41,17 +49,33 @@ fn main() {
             "cargo:rustc-link-search=native={}/build/Release",
             dst.display()
         );
+    } else if target.ends_with("-linux-android") {
+        // libc++ linked statically (CMAKE_ANDROID_STL_TYPE c++_static), so the .so doesn't need libc++_shared.so,
+        // which Unity's Android player doesn't ship
+        println!("cargo:rustc-link-search=native={}/build", dst.display());
+        let ndk_home = env::var("ANDROID_NDK_HOME").unwrap();
+        let arch = if target.starts_with("aarch64") { "aarch64" } else { "x86_64" };
+        println!(
+            "cargo:rustc-link-search=native={}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/{}-linux-android",
+            ndk_home, arch
+        );
+        println!("cargo:rustc-link-lib=static=c++_static");
+        println!("cargo:rustc-link-lib=static=c++abi");
     } else {
         println!("cargo:rustc-link-search=native={}/build", dst.display());
         println!("cargo:rustc-link-lib=dylib=c++");
     }
 
-    println!("cargo:rustc-link-lib=static=Luau.Ast");
+    // Dependents before their dependencies (GNU ld resolves static libraries in order). Luau 0.7xx merged
+    // RequireNavigator into Require and split Bytecode and Common out of the compiler.
+    println!("cargo:rustc-link-lib=static=Luau.Require");
     println!("cargo:rustc-link-lib=static=Luau.Config");
     println!("cargo:rustc-link-lib=static=Luau.Compiler");
+    println!("cargo:rustc-link-lib=static=Luau.CodeGen");
     println!("cargo:rustc-link-lib=static=Luau.VM");
-    println!("cargo:rustc-link-lib=static=Luau.RequireNavigator");
-    println!("cargo:rustc-link-lib=static=Luau.Require");
+    println!("cargo:rustc-link-lib=static=Luau.Ast");
+    println!("cargo:rustc-link-lib=static=Luau.Bytecode");
+    println!("cargo:rustc-link-lib=static=Luau.Common");
 
     bindgen::Builder::default()
         .headers([
@@ -87,6 +111,21 @@ fn main() {
         .generate()
         .unwrap()
         .write_to_file("src/luau_require.rs")
+        .unwrap();
+
+    // Code generation: bindings only. The exports (src/luau_codegen_ffi.rs) and the C# side
+    // (NativeMethods.CodeGen.cs) are written by hand, so iOS can report "not supported".
+    bindgen::Builder::default()
+        .headers(["../../luau/CodeGen/include/luacodegen.h"])
+        .allowlist_function("luau_codegen_.*")
+        .blocklist_type("lua_State")
+        .raw_line("use super::luau::*;")
+        .clang_arg(format!("--target={}", target))
+        .clang_arg("-fvisibility=default")
+        .layout_tests(false)
+        .generate()
+        .unwrap()
+        .write_to_file("src/luau_codegen.rs")
         .unwrap();
 
     let cs = new_csbindgen_builder("src/luau.rs")
@@ -144,6 +183,10 @@ using luarequire_pushproxyrequire_config_init_delegate = Luau.Native.luarequire_
 
 fn new_cmake_config() -> cmake::Config {
     let mut config = cmake::Config::new("../../luau");
+    // extern "C" APIs with LUA_USE_LONGJMP=1 (errors longjmp instead of throwing C++ exceptions)
+    config.define("LUAU_EXTERN_C", "ON");
+    config.define("LUAU_BUILD_CLI", "OFF");
+    config.define("LUAU_BUILD_TESTS", "OFF");
 
     let target = build_target::target_triple().unwrap();
 
@@ -178,6 +221,12 @@ fn new_cmake_config() -> cmake::Config {
                 config.define("CMAKE_CXX_COMPILER", cxx);
             }
         }
+    } else if target == "aarch64-apple-darwin" {
+        config.define("CMAKE_OSX_ARCHITECTURES", "arm64");
+        config.define("CMAKE_OSX_DEPLOYMENT_TARGET", "11.0");
+    } else if target == "x86_64-apple-darwin" {
+        config.define("CMAKE_OSX_ARCHITECTURES", "x86_64");
+        config.define("CMAKE_OSX_DEPLOYMENT_TARGET", "10.15");
     } else if target == "x86_64-apple-ios" {
         config.define("CMAKE_SYSTEM_NAME", "iOS");
         config.define("CMAKE_SYSTEM_PROCESSOR", "x86_64");

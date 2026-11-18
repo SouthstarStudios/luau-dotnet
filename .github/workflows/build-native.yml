@@ -1,0 +1,145 @@
+# Builds libluau (native/luau-ffi) for the platforms San Aurie ships, with Luau's native code generation linked in
+# (luau_codegen_* exports), runs the smoke test where the runner can execute the binary, and packs the Unity plugin
+# folders plus the regenerated C# bindings into one artifact: luau-unity-plugins.
+
+name: Build native libluau
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [san-aurie]
+
+jobs:
+  build:
+    name: ${{ matrix.plugin }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plugin: win-x64, os: windows-2022, target: x86_64-pc-windows-msvc, file: luau.dll, out: libluau.dll, test: true }
+          - { plugin: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, file: libluau.so, out: libluau.so, test: true }
+          - { plugin: osx-arm64, os: macos-15, target: aarch64-apple-darwin, file: libluau.dylib, out: libluau.dylib, test: true }
+          - { plugin: osx-x64, os: macos-15-intel, target: x86_64-apple-darwin, file: libluau.dylib, out: libluau.dylib, test: true }
+          - { plugin: ios-arm64, os: macos-15, target: aarch64-apple-ios, file: libluau.a, out: libluau.a, test: false }
+          - { plugin: android-arm64, os: ubuntu-22.04, target: aarch64-linux-android, file: libluau.so, out: libluau.so, test: false }
+          - { plugin: android-x64, os: ubuntu-22.04, target: x86_64-linux-android, file: libluau.so, out: libluau.so, test: false }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # native/luau-ffi/rust-toolchain pins the compiler; add the target to that toolchain
+      - name: Rust target
+        working-directory: native/luau-ffi
+        shell: bash
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustc --version
+
+      - name: Android NDK
+        if: contains(matrix.target, 'android')
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Android environment
+        if: contains(matrix.target, 'android')
+        shell: bash
+        run: |
+          ndk="${{ steps.ndk.outputs.ndk-path }}"
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "ANDROID_NDK_HOME=$ndk" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$bin/x86_64-linux-android26-clang" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=$bin/llvm-ar" >> $GITHUB_ENV
+          echo "AR_x86_64_linux_android=$bin/llvm-ar" >> $GITHUB_ENV
+
+      - name: libclang (bindgen)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> $GITHUB_ENV
+
+      - name: Build
+        working-directory: native/luau-ffi
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Smoke test (built-ins, codegen)
+        if: matrix.test
+        working-directory: native/luau-ffi
+        shell: bash
+        run: cargo test --release --target ${{ matrix.target }} -- --nocapture
+
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out/Plugins/${{ matrix.plugin }}
+          cp native/luau-ffi/target/${{ matrix.target }}/release/${{ matrix.file }} out/Plugins/${{ matrix.plugin }}/${{ matrix.out }}
+          if [ "${{ matrix.plugin }}" = "linux-x64" ]; then
+            mkdir -p out/Native out/Luau.Native
+            cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.g.cs out/Native/
+            cp src/Luau.Unity/Assets/Luau.Unity/Native/NativeMethods.Require.g.cs out/Native/
+            cp src/Luau.Native/NativeMethods.g.cs src/Luau.Native/NativeMethods.Require.g.cs out/Luau.Native/
+            cp native/luau-ffi/src/*.rs out/Luau.Native/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libluau-${{ matrix.plugin }}
+          path: out
+
+  package:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: libluau-*
+          merge-multiple: true
+
+      - name: Universal macOS dylib
+        run: |
+          lipo=$(ls /usr/bin/llvm-lipo* 2>/dev/null | head -1)
+          if [ -z "$lipo" ]; then sudo apt-get update && sudo apt-get install -y llvm && lipo=$(ls /usr/bin/llvm-lipo* | head -1); fi
+          mkdir -p artifacts/Plugins/osx
+          $lipo -create artifacts/Plugins/osx-arm64/libluau.dylib artifacts/Plugins/osx-x64/libluau.dylib -output artifacts/Plugins/osx/libluau.dylib
+          $lipo -info artifacts/Plugins/osx/libluau.dylib
+          rm -r artifacts/Plugins/osx-arm64 artifacts/Plugins/osx-x64
+
+      - name: Check exports
+        run: |
+          set -e
+          for f in artifacts/Plugins/linux-x64/libluau.so artifacts/Plugins/android-arm64/libluau.so artifacts/Plugins/android-x64/libluau.so; do
+            for s in ffi_luau_codegen_supported ffi_luau_codegen_create ffi_luau_codegen_compile ffi_luau_compile ffi_lua_newstate; do
+              nm -D --defined-only "$f" | grep -q " $s$" || { echo "$f is missing $s"; exit 1; }
+            done
+            echo "$f:"; readelf -d "$f" | grep NEEDED
+          done
+          objdump -p artifacts/Plugins/win-x64/libluau.dll | grep -q ffi_luau_codegen_supported
+          objdump -p artifacts/Plugins/win-x64/libluau.dll | grep "DLL Name"
+          nm artifacts/Plugins/ios-arm64/libluau.a 2>/dev/null | grep -q "T _ffi_luau_codegen_supported"
+
+      - name: Build info
+        run: |
+          {
+            echo "fork commit: $GITHUB_SHA ($GITHUB_REPOSITORY)"
+            echo "luau: $(git -C luau describe --tags --always) $(git -C luau rev-parse HEAD)"
+            echo "rust: $(cat native/luau-ffi/rust-toolchain)"
+            echo "android ndk: r27c (API 26, libc++ static)"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > artifacts/BUILD-INFO.txt
+          cat artifacts/BUILD-INFO.txt
+          find artifacts -type f | sort | xargs ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luau-unity-plugins
+          path: artifacts
