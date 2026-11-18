@@ -124,7 +124,7 @@ jobs:
             for s in ffi_luau_codegen_supported ffi_luau_codegen_create ffi_luau_codegen_compile ffi_luau_compile ffi_lua_newstate; do
               nm -D --defined-only "$f" | grep -q " $s$" || { echo "$f is missing $s"; exit 1; }
             done
-            echo "$f:"; readelf -d "$f" | grep NEEDED
+            echo "$f:"; readelf -d "$f" | grep NEEDED || echo "  (no NEEDED entries)"
           done
           objdump -p artifacts/Plugins/win-x64/libluau.dll | grep -q ffi_luau_codegen_supported
           objdump -p artifacts/Plugins/win-x64/libluau.dll | grep "DLL Name"
