@@ -75,14 +75,16 @@ jobs:
         shell: bash
         run: |
           f=native/luau-ffi/target/${{ matrix.target }}/release/${{ matrix.file }}
-          if [ -n "$ANDROID_NDK_HOME" ]; then bin=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-; else bin=""; fi
+          # Ubuntu runners set ANDROID_NDK_HOME themselves, so go by the target
+          android=${{ contains(matrix.target, 'android') }}
+          if [ "$android" = true ]; then bin=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-; else bin=""; fi
           ${bin}readelf -d "$f" | grep -E "NEEDED|SONAME"
           ${bin}readelf -d "$f" | grep -q "NEEDED.*libc\.so" || { echo "libc.so isn't a dependency"; exit 1; }
           missing=$(${bin}nm -D --undefined-only "$f" | grep -E " (lua|luaL|luau|luarequire|luaopen)_" || true)
           if [ -n "$missing" ]; then echo "Unresolved Luau symbols:"; echo "$missing"; exit 1; fi
           echo "undefined symbols: $(${bin}nm -D --undefined-only "$f" | wc -l)"
           # LOAD segments must be 16 KB-aligned on Android (Android 15+ page sizes)
-          if [ -n "$ANDROID_NDK_HOME" ]; then
+          if [ "$android" = true ]; then
             for a in $(${bin}readelf -lW "$f" | grep LOAD | awk '{ print $NF }'); do
               echo "  LOAD align $a"
               [ $((a)) -ge 16384 ] || { echo "not 16 KB-aligned"; exit 1; }
