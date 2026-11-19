@@ -81,6 +81,13 @@ jobs:
           missing=$(${bin}nm -D --undefined-only "$f" | grep -E " (lua|luaL|luau|luarequire|luaopen)_" || true)
           if [ -n "$missing" ]; then echo "Unresolved Luau symbols:"; echo "$missing"; exit 1; fi
           echo "undefined symbols: $(${bin}nm -D --undefined-only "$f" | wc -l)"
+          # LOAD segments must be 16 KB-aligned on Android (Android 15+ page sizes)
+          if [ -n "$ANDROID_NDK_HOME" ]; then
+            for a in $(${bin}readelf -lW "$f" | grep LOAD | awk '{ print $NF }'); do
+              echo "  LOAD align $a"
+              [ $((a)) -ge 16384 ] || { echo "not 16 KB-aligned"; exit 1; }
+            done
+          fi
 
       - name: Smoke test (built-ins, codegen)
         if: matrix.test
