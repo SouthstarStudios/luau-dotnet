@@ -83,6 +83,12 @@ jobs:
           missing=$(${bin}nm -D --undefined-only "$f" | grep -E " (lua|luaL|luau|luarequire|luaopen)_" || true)
           if [ -n "$missing" ]; then echo "Unresolved Luau symbols:"; echo "$missing"; exit 1; fi
           echo "undefined symbols: $(${bin}nm -D --undefined-only "$f" | wc -l)"
+          # On Android every strong import must come from a system library under its version (abort@LIBC). An
+          # unversioned one (__clear_cache, android_get_device_api_level) fails dlopen on phones that lack it
+          if [ "$android" = true ]; then
+            loose=$(${bin}nm -D --undefined-only "$f" | awk '$1 == "U" && $2 !~ /@/ { print $2 }')
+            if [ -n "$loose" ]; then echo "Unversioned imports (dlopen fails where the system lacks them):"; echo "$loose"; exit 1; fi
+          fi
           # LOAD segments must be 16 KB-aligned on Android (Android 15+ page sizes)
           if [ "$android" = true ]; then
             for a in $(${bin}readelf -lW "$f" | grep LOAD | awk '{ print $NF }'); do

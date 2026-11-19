@@ -79,9 +79,30 @@ fn main() {
         for lib in ["libc++_static.a", "libc++abi.a"] {
             std::fs::copy(format!("{}/{}", ndk_lib, lib), format!("{}/{}", cxx_dir, lib)).unwrap();
         }
+        // Clang's builtins too: Luau.CodeGen calls __clear_cache, which rustc's compiler_builtins doesn't have, and a
+        // shared library may leave it unresolved, so it only failed when Android loaded the library
+        let clang_lib = format!(
+            "{}/toolchains/llvm/prebuilt/linux-x86_64/lib/clang",
+            ndk_home
+        );
+        let version = std::fs::read_dir(&clang_lib)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .max()
+            .unwrap();
+        std::fs::copy(
+            format!(
+                "{}/{}/lib/linux/libclang_rt.builtins-{}-android.a",
+                clang_lib, version, arch
+            ),
+            format!("{}/libclang_rt_builtins.a", cxx_dir),
+        )
+        .unwrap();
         println!("cargo:rustc-link-search=native={}", cxx_dir);
         println!("cargo:rustc-link-lib=static=c++_static");
         println!("cargo:rustc-link-lib=static=c++abi");
+        println!("cargo:rustc-link-lib=static=clang_rt_builtins");
     } else if target != "x86_64-pc-windows-msvc" {
         println!("cargo:rustc-link-lib=dylib=c++");
     }
@@ -218,8 +239,10 @@ const UNBOUND: &[&str] = &[
 ];
 
 // csbindgen's default filter (no names starting with '_', such as MSVC's __va_start) plus the list above
+// android_*: bindgen also sees the NDK's <android/api-level.h> (through the C headers); exporting wrappers for them
+// made the library import android_get_device_api_level, which Android before 10 doesn't have
 fn keep_method(name: String) -> bool {
-    !name.starts_with('_') && !UNBOUND.contains(&name.as_str())
+    !name.starts_with('_') && !name.starts_with("android_") && !UNBOUND.contains(&name.as_str())
 }
 
 // San Aurie fork: the Luau update changed a few signatures that Luau.dll and other callers were compiled against.
