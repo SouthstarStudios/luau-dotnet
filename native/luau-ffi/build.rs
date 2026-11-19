@@ -259,6 +259,12 @@ fn new_cmake_config() -> cmake::Config {
         }
 
         config.cxxflag("/EHsc");
+        // The cmake crate replaces CMAKE_<LANG>_FLAGS_RELEASE with the cc crate's flags on MSVC (for /MD), which
+        // drops /O2 and /DNDEBUG: the VM then runs unoptimised with Luau's asserts on (about 20x slower). Set them
+        // here so it leaves them alone.
+        config.define("CMAKE_BUILD_TYPE", "Release");
+        config.define("CMAKE_C_FLAGS_RELEASE", "-nologo -MD -O2 -Ob2 -DNDEBUG");
+        config.define("CMAKE_CXX_FLAGS_RELEASE", "-nologo -MD -O2 -Ob2 -DNDEBUG");
     } else if target == "aarch64-unknown-linux-gnu" {
         config.define("CMAKE_SYSTEM_NAME", "Linux");
         config.define("CMAKE_SYSTEM_PROCESSOR", "aarch64");

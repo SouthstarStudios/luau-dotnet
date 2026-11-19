@@ -91,6 +91,15 @@ jobs:
             done
           fi
 
+      # Luau's asserts compile in their expression text; a release library must have none (no NDEBUG also means the
+      # MSVC build lost its optimisation flags, see build.rs)
+      - name: Check for a release build
+        shell: bash
+        run: |
+          f=native/luau-ffi/target/${{ matrix.target }}/release/${{ matrix.file }}
+          if grep -q "iscollectable(o1)" "$f"; then echo "$f was built with Luau's asserts on (no NDEBUG)"; exit 1; fi
+          echo "no assert strings in $f"
+
       - name: Smoke test (built-ins, codegen)
         if: matrix.test
         working-directory: native/luau-ffi
